@@ -35,6 +35,24 @@ def get_bookings():
     finally:
         connection.close()
 
+
+def has_overlap(connection, starts_at, ends_at, exclude_id=None):
+    bookings = connection.execute(
+        "SELECT id, booking_date, start_hour, duration_hours FROM bookings"
+    ).fetchall()
+
+    for booking in bookings:
+        if booking["id"] == exclude_id:
+            continue
+
+        booked_start = datetime.strptime(booking["booking_date"], "%Y-%m-%d")
+        booked_start = booked_start.replace(hour=booking["start_hour"])
+        booked_end = booked_start + timedelta(hours=booking["duration_hours"])
+
+        if starts_at < booked_end and booked_start < ends_at:
+            return True
+
+    return False
 @app.post("/bookings/add")
 def add_booking():
     customer_name = request.form.get("customer_name", "").strip()
@@ -54,7 +72,7 @@ def add_booking():
     if start_hour < 0 or start_hour > 23:
         return jsonify({"message": "Start hour must be between 0 and 23."}), 400
 
-    if duration_hours < 1 : 
+    if duration_hours < 1: 
           return jsonify({"Duration must be at least one hour"}), 400
     try:
         starts_at = datetime.strptime(booking_date, "%Y-%m-%d")
@@ -74,17 +92,8 @@ def add_booking():
     try:
         connection.execute("BEGIN IMMEDIATE")
         connection.row_factory = sqlite3.Row
-        existing_bookings = connection.execute(
-            "SELECT booking_date, start_hour, duration_hours FROM bookings"
-        ).fetchall()
-
-        for booking in existing_bookings:
-            booked_start = datetime.strptime(booking["booking_date"], "%Y-%m-%d")
-            booked_start = booked_start.replace(hour=booking["start_hour"])
-            booked_end = booked_start + timedelta(hours=booking["duration_hours"])
-
-            if starts_at < booked_end and booked_start < ends_at:
-                return jsonify({"message": "This time is already booked."}), 409
+        if has_overlap(connection, starts_at, ends_at):
+          return jsonify({"message": "This time is already booked."}), 409
 
         connection.execute(
             """
@@ -106,5 +115,67 @@ def add_booking():
         "end_at": ends_at.isoformat(sep=" ", timespec="minutes"),
         "duration_hours": duration_hours
     })
+
+@app.post("/bookings/<int:booking_id>/delete")
+def delete_booking(booking_id):
+    connection = sqlite3.connect("bookings.db")
+    try:
+        result = connection.execute(
+            "DELETE FROM bookings WHERE id = ?",
+            (booking_id,)
+        )
+
+        if result.rowcount == 0:
+            return jsonify({"message": "Booking not found."}), 404
+
+        connection.commit()
+        return jsonify({"message": "Booking deleted successfully."})
+    finally:
+        connection.close()
+
+@app.post("/bookings/<int:booking_id>/edit")
+def edit_booking(booking_id):
+    booking_date = request.form.get("booking_date", "").strip()
+
+    try:
+        start_hour = int(request.form.get("start_hour", ""))
+        duration_hours = int(request.form.get("duration_hours", ""))
+
+        if duration_hours < 1:
+            return jsonify({"message": "Duration must be at least one hour."}), 400
+
+        starts_at = datetime.strptime(booking_date, "%Y-%m-%d")
+        starts_at = starts_at.replace(hour=start_hour)
+        ends_at = starts_at + timedelta(hours=duration_hours)
+    except (ValueError, OverflowError):
+        return jsonify({"message": "Enter a valid date, start hour, and duration."}), 400
+
+    connection = sqlite3.connect("bookings.db")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.row_factory = sqlite3.Row
+
+        booking = connection.execute(
+            "SELECT id FROM bookings WHERE id = ?", (booking_id,)
+        ).fetchone()
+
+        if booking is None:
+            return jsonify({"message": "Booking not found."}), 404
+
+        if has_overlap(connection, starts_at, ends_at, exclude_id=booking_id):
+            return jsonify({"message": "This time is already booked."}), 409
+
+        connection.execute(
+            """
+            UPDATE bookings
+            SET booking_date = ?, start_hour = ?, duration_hours = ?
+            WHERE id = ?
+            """,
+            (starts_at.date().isoformat(), start_hour, duration_hours, booking_id)
+        )
+        connection.commit()
+        return jsonify({"message": "Booking updated successfully."})
+    finally:
+        connection.close()        
 if __name__ == "__main__":
     app.run(port=5050)
