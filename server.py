@@ -19,22 +19,34 @@ connection.execute("""
 connection.commit()
 connection.close()
 
+class BookingStore:
+    def __init__(self, db_name):
+        self.db_name = db_name
+
+    def list_bookings(self):
+        connection = sqlite3.connect(self.db_name)
+        try:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute("SELECT * FROM bookings ORDER BY id").fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            connection.close()
+
+
+booking_store = BookingStore("bookings.db")
+
+
 @app.get("/bookings")
 def get_bookings():
-    connection = sqlite3.connect("bookings.db")
-    try:
-        connection.row_factory = sqlite3.Row
-        rows = connection.execute("SELECT * FROM bookings ORDER BY id").fetchall()
-        bookings = [dict(row) for row in rows]
-        for booking in bookings:
-            starts_at = datetime.strptime(booking["booking_date"], "%Y-%m-%d")
-            starts_at = starts_at.replace(hour=booking["start_hour"])
-            ends_at = starts_at + timedelta(hours=booking["duration_hours"])
-            booking["end_at"] = ends_at.isoformat(sep=" ", timespec="minutes")
-        return jsonify(bookings)
-    finally:
-        connection.close()
+    bookings = booking_store.list_bookings()
 
+    for booking in bookings:
+        starts_at = datetime.strptime(booking["booking_date"], "%Y-%m-%d")
+        starts_at = starts_at.replace(hour=booking["start_hour"])
+        ends_at = starts_at + timedelta(hours=booking["duration_hours"])
+        booking["end_at"] = ends_at.isoformat(sep=" ", timespec="minutes")
+
+    return jsonify(bookings)
 
 def has_overlap(connection, starts_at, ends_at, exclude_id=None):
     bookings = connection.execute(
