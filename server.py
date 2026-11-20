@@ -68,9 +68,24 @@ def add_booking():
 
   
     booking_values = (customer_name, starts_at.date().isoformat(), start_hour, duration_hours)
+
     
     connection = sqlite3.connect("bookings.db")
     try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.row_factory = sqlite3.Row
+        existing_bookings = connection.execute(
+            "SELECT booking_date, start_hour, duration_hours FROM bookings"
+        ).fetchall()
+
+        for booking in existing_bookings:
+            booked_start = datetime.strptime(booking["booking_date"], "%Y-%m-%d")
+            booked_start = booked_start.replace(hour=booking["start_hour"])
+            booked_end = booked_start + timedelta(hours=booking["duration_hours"])
+
+            if starts_at < booked_end and booked_start < ends_at:
+                return jsonify({"message": "This time is already booked."}), 409
+
         connection.execute(
             """
             INSERT INTO bookings (customer_name, booking_date, start_hour, duration_hours)
