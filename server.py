@@ -1,6 +1,10 @@
+import os
 import sqlite3
 from datetime import datetime, timedelta
-connection = sqlite3.connect("bookings.db")
+
+# The database file is always stored next to server.py, whatever folder Flask is started from.
+DB_NAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bookings.db")
+connection = sqlite3.connect(DB_NAME)
 
 from flask import Flask, jsonify, request
 
@@ -33,7 +37,7 @@ class BookingStore:
             connection.close()
 
 
-booking_store = BookingStore("bookings.db")
+booking_store = BookingStore(DB_NAME)
 
 
 @app.get("/bookings")
@@ -47,6 +51,8 @@ def get_bookings():
         booking["end_at"] = ends_at.isoformat(sep=" ", timespec="minutes")
 
     return jsonify(bookings)
+
+
 
 def has_overlap(connection, starts_at, ends_at, exclude_id=None):
     bookings = connection.execute(
@@ -85,7 +91,7 @@ def add_booking():
         return jsonify({"message": "Start hour must be between 0 and 23."}), 400
 
     if duration_hours < 1: 
-          return jsonify({"Duration must be at least one hour"}), 400
+          return jsonify({"message": "Duration must be at least one hour."}), 400
     try:
         starts_at = datetime.strptime(booking_date, "%Y-%m-%d")
         starts_at = starts_at.replace(hour=start_hour)
@@ -100,7 +106,7 @@ def add_booking():
     booking_values = (customer_name, starts_at.date().isoformat(), start_hour, duration_hours)
 
     
-    connection = sqlite3.connect("bookings.db")
+    connection = sqlite3.connect(DB_NAME)
     try:
         connection.execute("BEGIN IMMEDIATE")
         connection.row_factory = sqlite3.Row
@@ -120,7 +126,7 @@ def add_booking():
     
     
     return jsonify({
-        "message": "Data received successfully.",
+        "message": "Booking added successfully.",
         "customer_name": customer_name,
         "booking_date": booking_date,
         "start_hour": start_hour,
@@ -130,7 +136,7 @@ def add_booking():
 
 @app.post("/bookings/<int:booking_id>/delete")
 def delete_booking(booking_id):
-    connection = sqlite3.connect("bookings.db")
+    connection = sqlite3.connect(DB_NAME)
     try:
         result = connection.execute(
             "DELETE FROM bookings WHERE id = ?",
@@ -162,7 +168,7 @@ def edit_booking(booking_id):
     except (ValueError, OverflowError):
         return jsonify({"message": "Enter a valid date, start hour, and duration."}), 400
 
-    connection = sqlite3.connect("bookings.db")
+    connection = sqlite3.connect(DB_NAME)
     try:
         connection.execute("BEGIN IMMEDIATE")
         connection.row_factory = sqlite3.Row
